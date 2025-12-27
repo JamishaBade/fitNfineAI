@@ -1,5 +1,6 @@
+// src/components/ActiveWorkoutTimer.tsx
 import React from "react";
-import { View, Text, TouchableOpacity } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 interface ActiveWorkoutTimerProps {
@@ -60,7 +61,7 @@ export const ActiveWorkoutTimer: React.FC<ActiveWorkoutTimerProps> = ({
         <Text className="text-6xl font-bold text-white">
           {formatTime(time)}
         </Text>
-        <Text className="text-lg mt-2 text-white opacity-90">
+        <Text className="text-lg mt-2 text-white" style={{ opacity: 0.9 }}>
           {getStatusText()}
         </Text>
       </View>
@@ -70,7 +71,7 @@ export const ActiveWorkoutTimer: React.FC<ActiveWorkoutTimerProps> = ({
         <Text className="text-xl font-bold text-white">
           {currentExercise || "Exercise"}
         </Text>
-        <Text className="text-white opacity-90">
+        <Text className="text-white" style={{ opacity: 0.9 }}>
           Set {currentSet} of {totalSets}
         </Text>
       </View>
@@ -78,12 +79,13 @@ export const ActiveWorkoutTimer: React.FC<ActiveWorkoutTimerProps> = ({
       {/* Control Buttons */}
       {isPaused ? (
         // Paused State Buttons
-        <View className="flex-row gap-3">
+        <View style={styles.buttonRow}>
           {onResume && (
             <TouchableOpacity
               className="flex-1 bg-green-600 p-4 rounded-xl items-center"
               onPress={onResume}
               activeOpacity={0.7}
+              style={{ marginRight: 6 }}
             >
               <Ionicons name="play" size={24} color="white" />
               <Text className="text-white font-semibold mt-1">Resume</Text>
@@ -94,6 +96,7 @@ export const ActiveWorkoutTimer: React.FC<ActiveWorkoutTimerProps> = ({
               className="flex-1 bg-red-600 p-4 rounded-xl items-center"
               onPress={onCancel}
               activeOpacity={0.7}
+              style={{ marginLeft: 6 }}
             >
               <Ionicons name="close" size={24} color="white" />
               <Text className="text-white font-semibold mt-1">Cancel</Text>
@@ -102,10 +105,10 @@ export const ActiveWorkoutTimer: React.FC<ActiveWorkoutTimerProps> = ({
         </View>
       ) : (
         // Active State Buttons
-        <View className="flex-row gap-3">
+        <View style={styles.buttonRow}>
           <TouchableOpacity
             className="flex-1 p-4 rounded-xl items-center"
-            style={{ backgroundColor: "rgba(255, 255, 255, 0.2)" }}
+            style={[styles.buttonTransparent, { marginRight: 6 }]}
             onPress={onPause}
             activeOpacity={0.7}
           >
@@ -116,7 +119,7 @@ export const ActiveWorkoutTimer: React.FC<ActiveWorkoutTimerProps> = ({
           {isResting ? (
             <TouchableOpacity
               className="flex-1 p-4 rounded-xl items-center"
-              style={{ backgroundColor: "rgba(255, 255, 255, 0.2)" }}
+              style={[styles.buttonTransparent, { marginLeft: 6 }]}
               onPress={onSkipRest}
               activeOpacity={0.7}
             >
@@ -128,6 +131,7 @@ export const ActiveWorkoutTimer: React.FC<ActiveWorkoutTimerProps> = ({
               className="flex-1 bg-green-600 p-4 rounded-xl items-center"
               onPress={onCompleteSet}
               activeOpacity={0.7}
+              style={{ marginLeft: 6 }}
             >
               <Ionicons name="checkmark" size={24} color="white" />
               <Text className="text-white font-semibold mt-1">
@@ -140,3 +144,13 @@ export const ActiveWorkoutTimer: React.FC<ActiveWorkoutTimerProps> = ({
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  buttonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  buttonTransparent: {
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+  },
+});

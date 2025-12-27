@@ -4,6 +4,7 @@ import React, {
   useContext,
   useState,
   useEffect,
+  useRef,
   ReactNode,
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -150,6 +151,9 @@ export const WorkoutProvider: React.FC<WorkoutProviderProps> = ({
   const [timer, setTimer] = useState(0);
   const [isResting, setIsResting] = useState(false);
 
+  // Use ref to store interval ID
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   // Load data on mount
   useEffect(() => {
     loadWorkoutData();
@@ -163,41 +167,59 @@ export const WorkoutProvider: React.FC<WorkoutProviderProps> = ({
     }
   }, [workoutPlans, completedWorkouts, activeWorkout, loading]);
 
-  // Timer logic
+  // FIXED TIMER LOGIC - Counts UP during exercise, DOWN during rest
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-
-    if (
-      activeWorkout?.status === "active" &&
-      activeWorkout.isResting &&
-      timer > 0
-    ) {
-      interval = setInterval(() => {
-        setTimer((prev) => {
-          if (prev <= 1) {
-            clearInterval(interval!);
-            setIsResting(false);
-
-            setActiveWorkout((prevWorkout) => {
-              if (!prevWorkout) return prevWorkout;
-              return {
-                ...prevWorkout,
-                isResting: false,
-                timer: 0,
-              };
-            });
-
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+    // Clear any existing interval
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
     }
 
+    // Only run timer if workout is active (not paused)
+    if (activeWorkout?.status === "active") {
+      if (isResting && timer > 0) {
+        // REST MODE: Count DOWN
+        timerIntervalRef.current = setInterval(() => {
+          setTimer((prev) => {
+            if (prev <= 1) {
+              // Rest is over
+              setIsResting(false);
+              setActiveWorkout((prevWorkout) => {
+                if (!prevWorkout) return prevWorkout;
+                return {
+                  ...prevWorkout,
+                  isResting: false,
+                  timer: 0,
+                };
+              });
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      } else if (!isResting) {
+        // EXERCISE MODE: Count UP
+        timerIntervalRef.current = setInterval(() => {
+          setTimer((prev) => prev + 1);
+          setActiveWorkout((prevWorkout) => {
+            if (!prevWorkout) return prevWorkout;
+            return {
+              ...prevWorkout,
+              totalDuration: prevWorkout.totalDuration + 1,
+            };
+          });
+        }, 1000);
+      }
+    }
+
+    // Cleanup on unmount or when dependencies change
     return () => {
-      if (interval) clearInterval(interval);
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
     };
-  }, [activeWorkout?.status, activeWorkout?.isResting, timer]);
+  }, [activeWorkout?.status, isResting, timer]);
 
   const loadWorkoutData = async () => {
     try {
@@ -373,6 +395,8 @@ export const WorkoutProvider: React.FC<WorkoutProviderProps> = ({
     setActiveWorkout(newActiveWorkout);
     setTimer(0);
     setIsResting(false);
+
+    console.log("✅ Workout started - Timer will begin counting up");
   };
 
   const completeSet = async () => {
@@ -387,6 +411,7 @@ export const WorkoutProvider: React.FC<WorkoutProviderProps> = ({
       updatedWorkout.totalSetsCompleted += 1;
 
       if (currentExercise.completedSets >= currentExercise.sets) {
+        // Exercise completed
         currentExercise.completed = true;
         updatedWorkout.completedExercises += 1;
 
@@ -394,6 +419,7 @@ export const WorkoutProvider: React.FC<WorkoutProviderProps> = ({
           updatedWorkout.currentExerciseIndex <
           updatedWorkout.exercises.length - 1
         ) {
+          // Move to next exercise
           updatedWorkout.currentExerciseIndex += 1;
           updatedWorkout.currentSet = 1;
           updatedWorkout.isResting = true;
@@ -403,13 +429,23 @@ export const WorkoutProvider: React.FC<WorkoutProviderProps> = ({
           updatedWorkout.timer = nextExercise.restTime;
           setTimer(nextExercise.restTime);
           setIsResting(true);
+
+          console.log(
+            `🔄 Moving to next exercise, rest for ${nextExercise.restTime}s`
+          );
+        } else {
+          // All exercises completed
+          console.log("✅ All exercises completed!");
         }
       } else {
+        // More sets to do for this exercise
         updatedWorkout.currentSet += 1;
         updatedWorkout.isResting = true;
         updatedWorkout.timer = currentExercise.restTime;
         setTimer(currentExercise.restTime);
         setIsResting(true);
+
+        console.log(`💤 Rest period started: ${currentExercise.restTime}s`);
       }
     }
 
@@ -426,13 +462,17 @@ export const WorkoutProvider: React.FC<WorkoutProviderProps> = ({
     setActiveWorkout(updatedWorkout);
     setTimer(0);
     setIsResting(false);
+
+    console.log("⏭️ Rest skipped, resuming exercise");
   };
 
   const completeWorkout = async (completionData?: any) => {
-    if (!activeWorkout) return;
+    if (!activeWorkout) {
+      throw new Error("No active workout to complete");
+    }
 
     try {
-      setLoading(true);
+      console.log("🏁 Completing workout...");
 
       const endTime = new Date().toISOString();
       const startTime = new Date(activeWorkout.startTime);
@@ -473,15 +513,21 @@ export const WorkoutProvider: React.FC<WorkoutProviderProps> = ({
       // Add to completed workouts
       setCompletedWorkouts((prev) => [...prev, completedWorkout]);
 
-      // Clear active workout
+      // Clear active workout and timer
       setActiveWorkout(null);
       setTimer(0);
       setIsResting(false);
+
+      // Clear the interval
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+
+      console.log("✅ Workout completed successfully!");
     } catch (error) {
-      console.error("Error completing workout:", error);
+      console.error("❌ Error completing workout:", error);
       throw error;
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -490,7 +536,10 @@ export const WorkoutProvider: React.FC<WorkoutProviderProps> = ({
 
     const updatedWorkout = { ...activeWorkout };
     updatedWorkout.status = "paused";
+    updatedWorkout.timer = timer; // Save current timer value
     setActiveWorkout(updatedWorkout);
+
+    console.log("⏸️ Workout paused");
   };
 
   const resumeWorkout = async () => {
@@ -500,16 +549,22 @@ export const WorkoutProvider: React.FC<WorkoutProviderProps> = ({
     updatedWorkout.status = "active";
     setActiveWorkout(updatedWorkout);
 
-    // If we were resting, update the timer display
-    if (updatedWorkout.isResting) {
-      setTimer(updatedWorkout.timer);
-    }
+    // Timer will automatically resume from useEffect
+    console.log("▶️ Workout resumed");
   };
 
   const cancelWorkout = async () => {
+    // Clear the interval
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+
     setActiveWorkout(null);
     setTimer(0);
     setIsResting(false);
+
+    console.log("❌ Workout cancelled");
   };
 
   const toggleFavorite = async (id: string) => {

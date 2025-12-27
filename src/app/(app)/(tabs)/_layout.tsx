@@ -26,9 +26,9 @@ function Layout() {
           name="exercises"
           options={{
             headerShown: false,
-            title: "Exercises",
+            title: "myAI",
             tabBarIcon: ({ color, size }) => (
-              <AntDesign name="book" color={color} size={size} />
+              <AntDesign name="message" color={color} size={size} />
             ),
           }}
         />
