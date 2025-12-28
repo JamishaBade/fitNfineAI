@@ -23,7 +23,7 @@ function Layout() {
         />
 
         <Tabs.Screen
-          name="exercises"
+          name="chat"
           options={{
             headerShown: false,
             title: "myAI",
