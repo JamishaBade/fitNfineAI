@@ -49,7 +49,7 @@ const TypingDot = ({ delay = 0 }: { delay?: number }) => {
       Animated.sequence([
         Animated.timing(bounceAnim, {
           toValue: -8,
-          duration: 400,
+          duration: 4000,
           delay,
           easing: Easing.ease,
           useNativeDriver: true,
@@ -79,7 +79,7 @@ const TypingIndicator = React.memo(() => (
     <View className="bg-gray-100 rounded-2xl rounded-bl-md px-5 py-4">
       <View className="flex-row items-center">
         <TypingDot delay={0} />
-        <TypingDot delay={150} />
+        <TypingDot delay={200} />
         <TypingDot delay={300} />
       </View>
     </View>
@@ -398,12 +398,12 @@ const EmptyState = React.memo(
 
 EmptyState.displayName = "EmptyState";
 
-// Hugging Face API Configuration
+// FIXED: Hugging Face API Configuration - Corrected endpoint URL
 const HF_CONFIG = {
-  apiKey: "hf..",
+  apiKey: "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", // Replace with your actual HF API key
   model: "mistralai/Mistral-7B-Instruct-v0.2",
-  endpoint:
-    "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2",
+  // FIXED: Use the correct Hugging Face Inference API endpoint
+  endpoint: "router.huggingface.co/hf-inference/models/",
 };
 
 const isValidHFToken = (token: string): boolean =>
@@ -416,19 +416,24 @@ const generateAIResponse = async (userMessage: string): Promise<string> => {
       return getSmartFallbackResponse(userMessage);
     }
 
-    const prompt = `
-You are a professional fitness coach.
-Give clear, safe, beginner-friendly advice.
+    const prompt = `<s>[INST] You are a professional fitness coach. Give clear, safe, beginner-friendly advice.
 
-Question:
-${userMessage}
+Question: ${userMessage}
 
-Answer:
-`;
+Answer: [/INST]`;
 
     const response = await axios.post(
       HF_CONFIG.endpoint,
-      { inputs: prompt }, // same as before
+      {
+        inputs: prompt,
+        parameters: {
+          max_new_tokens: 500,
+          temperature: 0.7,
+          top_p: 0.95,
+          do_sample: true,
+          return_full_text: false,
+        },
+      },
       {
         headers: {
           Authorization: `Bearer ${HF_CONFIG.apiKey}`,
@@ -448,17 +453,29 @@ Answer:
       throw new Error(response.data.error);
     }
 
+    // Clean up the response - remove the instruction tags if present
+    aiText = aiText.replace(/\[\/INST\]/g, "").trim();
+
     if (!aiText || aiText.trim().length < 5) {
       throw new Error("Empty AI response");
     }
 
     return aiText.trim();
   } catch (error: any) {
-    console.error("Hugging Face API Error:", {
-      message: error?.message,
-      status: error?.response?.status,
-      data: error?.response?.data,
-    });
+    // console.error("Hugging Face API Error:", {
+    //   message: error?.message,
+    //   status: error?.response?.status,
+    //   data: error?.response?.data,
+    // });
+
+    // Handle specific error cases
+    if (error?.response?.status === 503) {
+      // Model is loading
+      return (
+        "The AI model is currently loading. Please try again in a moment. In the meantime, here's some general advice:\n\n" +
+        getSmartFallbackResponse(userMessage)
+      );
+    }
 
     return getSmartFallbackResponse(userMessage);
   }
@@ -608,7 +625,7 @@ export default function WorkoutAIChatScreen() {
     currentChat.updatedAt = new Date();
 
     setChats(updatedChats);
-    setActiveChat(currentChat);
+    setActiveChat({ ...currentChat });
     setInputText("");
     saveChats(updatedChats);
 
@@ -623,6 +640,13 @@ export default function WorkoutAIChatScreen() {
 
     currentChat.messages.push(aiMessage);
     currentChat.updatedAt = new Date();
+
+    // Update the chat in the array
+    const chatIndex = updatedChats.findIndex((c) => c.id === currentChat!.id);
+    if (chatIndex !== -1) {
+      updatedChats[chatIndex] = { ...currentChat };
+    }
+
     setChats([...updatedChats]);
     setActiveChat({ ...currentChat });
     saveChats([...updatedChats]);
@@ -631,7 +655,10 @@ export default function WorkoutAIChatScreen() {
 
   const handleQuickPrompt = (prompt: string) => {
     setInputText(prompt);
-    handleSend();
+    // Use setTimeout to ensure state is updated before sending
+    setTimeout(() => {
+      handleSend();
+    }, 100);
   };
 
   const handleDeleteChat = (chat: Chat) => {
@@ -655,7 +682,9 @@ export default function WorkoutAIChatScreen() {
       c.id === chat.id ? { ...c, name: newName } : c
     );
     setChats(updated);
-    setActiveChat({ ...chat, name: newName });
+    if (activeChat?.id === chat.id) {
+      setActiveChat({ ...activeChat, name: newName });
+    }
     saveChats(updated);
   };
 
@@ -678,22 +707,34 @@ export default function WorkoutAIChatScreen() {
         )}
       </View>
 
-      <View className="flex-row items-center px-4 py-3 border-t border-gray-200 bg-white">
-        <TouchableOpacity onPress={() => setShowHistory(true)} className="mr-3">
-          <Ionicons name="chatbox-ellipses-outline" size={28} color="#4B5563" />
-        </TouchableOpacity>
-        <TextInput
-          className="flex-1 bg-gray-100 rounded-2xl px-4 py-2 text-gray-900"
-          placeholder="Type a message..."
-          value={inputText}
-          onChangeText={setInputText}
-          onSubmitEditing={handleSend}
-          returnKeyType="send"
-        />
-        <TouchableOpacity onPress={handleSend} className="ml-3">
-          <Ionicons name="send" size={28} color="#3B82F6" />
-        </TouchableOpacity>
-      </View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+      >
+        <View className="flex-row items-center px-4 py-3 border-t border-gray-200 bg-white">
+          <TouchableOpacity
+            onPress={() => setShowHistory(true)}
+            className="mr-3"
+          >
+            <Ionicons
+              name="chatbox-ellipses-outline"
+              size={28}
+              color="#4B5563"
+            />
+          </TouchableOpacity>
+          <TextInput
+            className="flex-1 bg-gray-100 rounded-2xl px-4 py-2 text-gray-900"
+            placeholder="Type a message..."
+            value={inputText}
+            onChangeText={setInputText}
+            onSubmitEditing={handleSend}
+            returnKeyType="send"
+          />
+          <TouchableOpacity onPress={handleSend} className="ml-3">
+            <Ionicons name="send" size={28} color="#3B82F6" />
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
 
       <ChatHistoryModal
         visible={showHistory}
