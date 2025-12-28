@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,7 +19,69 @@ import { WorkoutCard } from "../../../components/WorkoutCard";
 import { ActiveWorkoutTimer } from "../../../components/ActiveWorkoutTimer";
 import { useWorkout } from "../../../contexts/WorkoutContext";
 
+// Simplified exercise database
+const EXERCISE_DATABASE = [
+  {
+    name: "Push-ups",
+    category: "strength",
+    type: "reps",
+    sets: 3,
+    reps: 12,
+    rest: 60,
+  },
+  {
+    name: "Squats",
+    category: "strength",
+    type: "reps",
+    sets: 3,
+    reps: 15,
+    rest: 60,
+  },
+  {
+    name: "Plank",
+    category: "strength",
+    type: "duration",
+    sets: 3,
+    duration: 30,
+    rest: 30,
+  },
+  {
+    name: "Running",
+    category: "cardio",
+    type: "duration",
+    sets: 1,
+    duration: 600,
+    rest: 0,
+  },
+  {
+    name: "Jumping Jacks",
+    category: "cardio",
+    type: "reps",
+    sets: 3,
+    reps: 30,
+    rest: 30,
+  },
+  {
+    name: "Burpees",
+    category: "cardio",
+    type: "reps",
+    sets: 3,
+    reps: 10,
+    rest: 45,
+  },
+  {
+    name: "Downward Dog",
+    category: "yoga",
+    type: "duration",
+    sets: 3,
+    duration: 30,
+    rest: 15,
+  },
+];
+
 export default function WorkoutScreen() {
+  console.log("🎯 WorkoutScreen rendering...");
+
   const {
     workoutPlans,
     activeWorkout,
@@ -35,25 +98,38 @@ export default function WorkoutScreen() {
     cancelWorkout,
     toggleFavorite,
     createCustomWorkout,
+    deleteCustomWorkout,
     refreshWorkoutData,
   } = useWorkout();
+
+  console.log("📊 Workout data:", {
+    workoutPlansCount: workoutPlans?.length,
+    loading,
+    stats: !!stats,
+  });
 
   const [activeWorkoutModal, setActiveWorkoutModal] = useState(false);
   const [workoutCompleteModal, setWorkoutCompleteModal] = useState(false);
   const [createWorkoutModal, setCreateWorkoutModal] = useState(false);
   const [workoutDetailsModal, setWorkoutDetailsModal] = useState(false);
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
 
   const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [workoutToDelete, setWorkoutToDelete] = useState<any>(null);
 
   const [newWorkout, setNewWorkout] = useState({
     name: "",
     description: "",
-    duration: "",
+    duration: "30",
     difficulty: "beginner",
     category: "strength",
   });
+
+  const [selectedExercises, setSelectedExercises] = useState<any[]>([]);
+  const [showExerciseSelector, setShowExerciseSelector] = useState(false);
+  const [exerciseFilter, setExerciseFilter] = useState("all");
 
   const [completionData, setCompletionData] = useState({
     rating: 0,
@@ -62,7 +138,7 @@ export default function WorkoutScreen() {
     difficulty: "medium",
   });
 
-  const categories = ["all", "strength", "cardio", "hiit", "yoga", "custom"];
+  const categories = ["all", "strength", "cardio", "yoga", "custom"];
   const difficultyLevels = ["beginner", "intermediate", "advanced"];
   const feelOptions = [
     { value: "great", label: "Great", icon: "happy" },
@@ -70,6 +146,15 @@ export default function WorkoutScreen() {
     { value: "okay", label: "Okay", icon: "remove-circle-outline" },
     { value: "tired", label: "Tired", icon: "sad-outline" },
   ];
+  const openExerciseSelector = () => {
+    setCreateWorkoutModal(false);
+    setShowExerciseSelector(true);
+  };
+
+  const closeExerciseSelector = () => {
+    setShowExerciseSelector(false);
+    setCreateWorkoutModal(true);
+  };
 
   useEffect(() => {
     if (workoutCompleteModal) {
@@ -83,6 +168,8 @@ export default function WorkoutScreen() {
   }, [workoutCompleteModal]);
 
   const filteredWorkouts = useMemo(() => {
+    if (!workoutPlans) return [];
+
     return workoutPlans.filter((workout) => {
       if (selectedCategory === "all") return true;
       if (selectedCategory === "custom") return workout.createdBy === "user";
@@ -90,7 +177,16 @@ export default function WorkoutScreen() {
     });
   }, [workoutPlans, selectedCategory]);
 
+  // Filter exercises based on selected category
+  const filteredExercises = useMemo(() => {
+    if (exerciseFilter === "all") {
+      return EXERCISE_DATABASE;
+    }
+    return EXERCISE_DATABASE.filter((ex) => ex.category === exerciseFilter);
+  }, [exerciseFilter]);
+
   const handleStartWorkout = async (workout: any) => {
+    console.log("🏃 Starting workout:", workout.name);
     try {
       await startWorkout(workout);
       setActiveWorkoutModal(true);
@@ -106,21 +202,22 @@ export default function WorkoutScreen() {
       return;
     }
 
-    console.log("Opening completion modal...");
-    console.log("Active workout status:", activeWorkout.status);
-    console.log("Current exercise index:", activeWorkout.currentExerciseIndex);
-    console.log("Current set:", activeWorkout.currentSet);
-
-    // Pause the workout if it's running
+    // Pause workout if active
     if (activeWorkout.status === "active") {
-      completeWorkout();
+      pauseWorkout();
     }
 
-    setWorkoutCompleteModal(true);
+    // Close the active workout modal first
+    setActiveWorkoutModal(false);
+
+    // Use a small delay to ensure the first modal closes completely
+    setTimeout(() => {
+      setWorkoutCompleteModal(true);
+    }, 300);
   };
 
   const handleCompleteWorkout = async () => {
-    console.log("🎯 Completing workout...");
+    console.log("✅ Completing workout...");
 
     if (!activeWorkout) {
       Alert.alert("Error", "No active workout to complete");
@@ -140,45 +237,26 @@ export default function WorkoutScreen() {
     setIsCompleting(true);
 
     try {
-      console.log("📊 Sending completion data:", completionData);
-      console.log("📊 Active workout:", activeWorkout);
-
       // Call the completeWorkout function
-      const result = await completeWorkout(completionData);
-      console.log("✅ Workout completion result:", result);
+      await completeWorkout(completionData);
 
       // Close modals
       setWorkoutCompleteModal(false);
       setActiveWorkoutModal(false);
 
       // Show success message
-      Alert.alert("Awesome! 🎉", "Workout completed successfully!", [
-        {
-          text: "Great!",
-          onPress: () => {
-            // Refresh data if needed
-            if (refreshWorkoutData) {
-              refreshWorkoutData();
-            }
-          },
-        },
-      ]);
+      Alert.alert("Awesome! 🎉", "Workout completed successfully!");
+
+      // Refresh data if needed
+      if (refreshWorkoutData) {
+        refreshWorkoutData();
+      }
     } catch (error: any) {
       console.error("❌ Error completing workout:", error);
-
-      let errorMessage = "Failed to save workout completion";
-      if (error?.message) {
-        errorMessage = error.message;
-      }
-
-      Alert.alert("Oops!", errorMessage, [
-        {
-          text: "OK",
-          onPress: () => {
-            setIsCompleting(false);
-          },
-        },
-      ]);
+      Alert.alert(
+        "Oops!",
+        error.message || "Failed to save workout completion"
+      );
     } finally {
       setIsCompleting(false);
     }
@@ -194,6 +272,7 @@ export default function WorkoutScreen() {
           try {
             await cancelWorkout();
             setActiveWorkoutModal(false);
+            setWorkoutCompleteModal(false);
           } catch (error) {
             console.error("Cancel workout error:", error);
           }
@@ -203,6 +282,8 @@ export default function WorkoutScreen() {
   };
 
   const handleCreateWorkout = async () => {
+    console.log("🛠️ Creating custom workout...");
+
     if (!newWorkout.name.trim()) {
       Alert.alert("Error", "Workout name is required");
       return;
@@ -214,35 +295,111 @@ export default function WorkoutScreen() {
       return;
     }
 
+    if (selectedExercises.length === 0) {
+      Alert.alert("Error", "Please add at least one exercise to your workout");
+      return;
+    }
+
     try {
-      await createCustomWorkout({
+      // Create the workout object with all required fields
+      const workoutData = {
+        id: `custom_${Date.now()}`,
         name: newWorkout.name,
         description: newWorkout.description,
-        duration,
+        duration: duration,
         difficulty: newWorkout.difficulty,
         category: newWorkout.category,
-        calories: Math.round(duration * 8),
-      });
+        calories: Math.round(duration * 7),
+        exercises: selectedExercises.map((exercise) => ({
+          id: `ex_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          name: exercise.name,
+          sets: exercise.sets || 3,
+          reps: exercise.type === "reps" ? exercise.reps || 10 : undefined,
+          duration:
+            exercise.type === "duration" ? exercise.duration || 30 : undefined,
+          rest: exercise.rest || 30,
+        })),
+        createdBy: "user",
+        isFavorite: false,
+        image:
+          "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400", // Default image
+        targetMuscles: ["Full Body"], // Default
+        equipment: ["Bodyweight"], // Default
+      };
 
+      console.log("📦 Sending workout data:", workoutData);
+
+      await createCustomWorkout(workoutData);
+
+      // Reset form
       setNewWorkout({
         name: "",
         description: "",
-        duration: "",
+        duration: "30",
         difficulty: "beginner",
         category: "strength",
       });
-
+      setSelectedExercises([]);
       setCreateWorkoutModal(false);
-      if (refreshWorkoutData) await refreshWorkoutData();
 
-      Alert.alert("Success", "Custom workout created!");
-    } catch (error) {
-      console.error("Create workout error:", error);
-      Alert.alert("Error", "Failed to create workout. Please try again.");
+      // Refresh the workout list
+      if (refreshWorkoutData) {
+        await refreshWorkoutData();
+      }
+
+      Alert.alert("Success! 🎉", "Your custom workout has been created!");
+    } catch (error: any) {
+      console.error("❌ Create workout error:", error);
+      Alert.alert(
+        "Error",
+        error.message || "Failed to create workout. Please try again."
+      );
     }
   };
 
-  if (loading && workoutPlans.length === 0) {
+  const handleDeleteWorkout = async () => {
+    if (!workoutToDelete) return;
+
+    try {
+      await deleteCustomWorkout(workoutToDelete.id);
+
+      setDeleteConfirmModal(false);
+      setWorkoutDetailsModal(false);
+
+      if (refreshWorkoutData) await refreshWorkoutData();
+
+      Alert.alert("Success", "Workout deleted successfully!");
+    } catch (error) {
+      console.error("Delete workout error:", error);
+      Alert.alert("Error", "Failed to delete workout. Please try again.");
+    }
+  };
+
+  const addExercise = (exercise: any) => {
+    // Create a copy of the exercise with a unique ID
+    const newExercise = {
+      ...exercise,
+      id: `ex_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    };
+    setSelectedExercises([...selectedExercises, newExercise]);
+  };
+
+  const removeExercise = (index: number) => {
+    const updatedExercises = [...selectedExercises];
+    updatedExercises.splice(index, 1);
+    setSelectedExercises(updatedExercises);
+  };
+
+  const updateExercise = (index: number, field: string, value: any) => {
+    const updatedExercises = [...selectedExercises];
+    updatedExercises[index] = {
+      ...updatedExercises[index],
+      [field]: value,
+    };
+    setSelectedExercises(updatedExercises);
+  };
+
+  if (loading && workoutPlans?.length === 0) {
     return (
       <SafeAreaView className="flex-1 items-center justify-center bg-gray-50">
         <ActivityIndicator size="large" color="#3B82F6" />
@@ -253,7 +410,7 @@ export default function WorkoutScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-gray-50">
-      <ScrollView>
+      <ScrollView showsVerticalScrollIndicator={false}>
         {/* HEADER */}
         <View className="px-6 pt-6 pb-4 bg-white">
           <View className="flex-row justify-between items-center">
@@ -270,7 +427,7 @@ export default function WorkoutScreen() {
               onPress={() => setCreateWorkoutModal(true)}
               activeOpacity={0.6}
             >
-              <Ionicons name="add" size={24} />
+              <Ionicons name="add" size={24} color="#374151" />
             </TouchableOpacity>
           </View>
 
@@ -313,7 +470,7 @@ export default function WorkoutScreen() {
 
         {/* WORKOUT LIST */}
         <View className="px-6 mt-6 pb-6">
-          {filteredWorkouts.length > 0 ? (
+          {filteredWorkouts && filteredWorkouts.length > 0 ? (
             filteredWorkouts.map((workout) => (
               <WorkoutCard
                 key={workout.id}
@@ -324,20 +481,36 @@ export default function WorkoutScreen() {
                   setSelectedWorkout(workout);
                   setWorkoutDetailsModal(true);
                 }}
+                onDelete={
+                  workout.createdBy === "user"
+                    ? () => {
+                        setWorkoutToDelete(workout);
+                        setDeleteConfirmModal(true);
+                      }
+                    : undefined
+                }
               />
             ))
           ) : (
             <View className="items-center justify-center py-12">
               <Ionicons name="barbell-outline" size={64} color="#D1D5DB" />
               <Text className="text-gray-400 mt-4">No workouts found</Text>
+              <Text className="text-gray-400 text-sm mt-2">
+                Tap the + button to create your first workout
+              </Text>
             </View>
           )}
         </View>
       </ScrollView>
 
       {/* ACTIVE WORKOUT MODAL */}
-      <Modal visible={activeWorkoutModal} transparent animationType="slide">
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}>
+      <Modal
+        visible={activeWorkoutModal}
+        transparent
+        animationType="slide"
+        onRequestClose={handleCancelWorkout}
+      >
+        <View className="flex-1 bg-black/50">
           <View className="flex-1 mt-20 bg-white rounded-t-3xl">
             {activeWorkout && (
               <>
@@ -355,7 +528,10 @@ export default function WorkoutScreen() {
                   </View>
                 </View>
 
-                <ScrollView className="p-6">
+                <ScrollView
+                  className="p-6"
+                  showsVerticalScrollIndicator={false}
+                >
                   <ActiveWorkoutTimer
                     time={timer}
                     isResting={isResting}
@@ -380,7 +556,7 @@ export default function WorkoutScreen() {
 
                   {/* Complete Workout Button */}
                   <TouchableOpacity
-                    className="bg-green-600 rounded-xl py-4 mt-8"
+                    className="bg-green-600 rounded-xl py-4 mt-8 mb-4"
                     onPress={handleOpenCompleteModal}
                     activeOpacity={0.6}
                   >
@@ -395,32 +571,34 @@ export default function WorkoutScreen() {
         </View>
       </Modal>
 
-      {/* WORKOUT COMPLETE MODAL */}
-      <Modal visible={workoutCompleteModal} transparent animationType="slide">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.8)" }}
-        >
-          <View className="flex-1 justify-center p-6">
-            <View className="bg-white rounded-3xl p-6">
+      {/* WORKOUT COMPLETE MODAL - FIXED & ADDED BACK */}
+      <Modal
+        visible={workoutCompleteModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setWorkoutCompleteModal(false)}
+      >
+        <View className="flex-1 bg-black/50 justify-center items-center p-6">
+          <View className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[80%]">
+            <ScrollView showsVerticalScrollIndicator={false}>
               <View className="items-center mb-6">
                 <View className="bg-green-100 w-20 h-20 rounded-full items-center justify-center mb-4">
-                  <Ionicons name="checkmark" size={48} color="#10B981" />
+                  <Ionicons name="trophy" size={40} color="#10B981" />
                 </View>
-                <Text className="text-2xl font-bold mb-2">
-                  Workout Complete! 🎉
+                <Text className="text-2xl font-bold text-gray-800 mb-2">
+                  Workout Complete!
                 </Text>
-                <Text className="text-gray-500 text-center">
-                  Great job on finishing your workout
+                <Text className="text-gray-600 text-center">
+                  Great job! How was your workout?
                 </Text>
               </View>
 
               {/* Star Rating */}
               <View className="mb-6">
-                <Text className="text-sm font-medium text-gray-700 mb-2">
-                  Rate your workout *
+                <Text className="text-lg font-semibold text-gray-700 mb-3 text-center">
+                  Rate your workout
                 </Text>
-                <View className="flex-row justify-around mb-4">
+                <View className="flex-row justify-center gap-2">
                   {[1, 2, 3, 4, 5].map((star) => (
                     <TouchableOpacity
                       key={star}
@@ -435,24 +613,19 @@ export default function WorkoutScreen() {
                             ? "star"
                             : "star-outline"
                         }
-                        size={32}
+                        size={36}
                         color={
-                          star <= completionData.rating ? "#F59E0B" : "#D1D5DB"
+                          star <= completionData.rating ? "#FBBF24" : "#D1D5DB"
                         }
                       />
                     </TouchableOpacity>
                   ))}
                 </View>
-                {completionData.rating === 0 && (
-                  <Text className="text-red-500 text-xs text-center">
-                    Please select a rating
-                  </Text>
-                )}
               </View>
 
               {/* How did you feel? */}
               <View className="mb-6">
-                <Text className="text-sm font-medium text-gray-700 mb-2">
+                <Text className="text-lg font-semibold text-gray-700 mb-3">
                   How did you feel?
                 </Text>
                 <View className="flex-row justify-between">
@@ -465,44 +638,42 @@ export default function WorkoutScreen() {
                           feel: option.value,
                         })
                       }
-                      className={`flex-1 mx-1 py-3 rounded-xl border-2 ${
+                      className={`items-center p-3 rounded-xl ${
                         completionData.feel === option.value
-                          ? "border-blue-600 bg-blue-50"
-                          : "border-gray-200 bg-white"
+                          ? "bg-blue-50 border-2 border-blue-200"
+                          : "bg-gray-50"
                       }`}
                       activeOpacity={0.6}
                     >
-                      <View className="items-center">
-                        <Ionicons
-                          name={option.icon as any}
-                          size={24}
-                          color={
-                            completionData.feel === option.value
-                              ? "#3B82F6"
-                              : "#9CA3AF"
-                          }
-                        />
-                        <Text
-                          className={`text-xs mt-1 ${
-                            completionData.feel === option.value
-                              ? "text-blue-600 font-semibold"
-                              : "text-gray-500"
-                          }`}
-                        >
-                          {option.label}
-                        </Text>
-                      </View>
+                      <Ionicons
+                        name={option.icon as any}
+                        size={28}
+                        color={
+                          completionData.feel === option.value
+                            ? "#3B82F6"
+                            : "#6B7280"
+                        }
+                      />
+                      <Text
+                        className={`mt-2 ${
+                          completionData.feel === option.value
+                            ? "text-blue-600 font-medium"
+                            : "text-gray-600"
+                        }`}
+                      >
+                        {option.label}
+                      </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               </View>
 
-              {/* Difficulty */}
+              {/* Difficulty Level */}
               <View className="mb-6">
-                <Text className="text-sm font-medium text-gray-700 mb-2">
-                  Difficulty level
+                <Text className="text-lg font-semibold text-gray-700 mb-3">
+                  Difficulty Level
                 </Text>
-                <View className="flex-row justify-between">
+                <View className="flex-row gap-3">
                   {["easy", "medium", "hard"].map((level) => (
                     <TouchableOpacity
                       key={level}
@@ -512,7 +683,7 @@ export default function WorkoutScreen() {
                           difficulty: level,
                         })
                       }
-                      className={`flex-1 mx-1 py-3 rounded-xl border-2 ${
+                      className={`flex-1 py-3 rounded-xl border-2 ${
                         completionData.difficulty === level
                           ? "border-blue-600 bg-blue-50"
                           : "border-gray-200 bg-white"
@@ -535,15 +706,15 @@ export default function WorkoutScreen() {
 
               {/* Notes */}
               <View className="mb-6">
-                <Text className="text-sm font-medium text-gray-700 mb-2">
-                  Add notes (optional)
+                <Text className="text-lg font-semibold text-gray-700 mb-3">
+                  Notes (optional)
                 </Text>
                 <TextInput
-                  placeholder="How did you feel? Any notes..."
-                  className="border border-gray-200 rounded-xl p-3 min-h-[80px]"
+                  placeholder="Any notes about your workout..."
+                  className="border border-gray-200 rounded-xl p-3 min-h-[100px]"
                   value={completionData.notes}
-                  onChangeText={(t) =>
-                    setCompletionData({ ...completionData, notes: t })
+                  onChangeText={(text) =>
+                    setCompletionData({ ...completionData, notes: text })
                   }
                   multiline
                   textAlignVertical="top"
@@ -551,84 +722,91 @@ export default function WorkoutScreen() {
               </View>
 
               {/* Action Buttons */}
-              <View className="flex-row gap-3">
+              <View className="flex-row gap-3 mt-4">
                 <TouchableOpacity
-                  className="flex-1 bg-gray-100 py-4 rounded-xl"
+                  className="flex-1 bg-gray-100 py-3 rounded-xl"
                   onPress={() => {
                     setWorkoutCompleteModal(false);
-                    // Resume workout if it was paused
                     if (activeWorkout?.status === "paused") {
                       resumeWorkout();
                     }
                   }}
-                  disabled={isCompleting}
                   activeOpacity={0.6}
                 >
                   <Text className="text-gray-700 text-center font-semibold">
-                    Go Back
+                    Back
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  className={`flex-1 py-4 rounded-xl flex-row items-center justify-center ${
-                    completionData.rating === 0 || isCompleting
-                      ? "bg-gray-300"
-                      : "bg-green-600"
-                  }`}
+                  className="flex-1 bg-green-600 py-3 rounded-xl"
                   onPress={handleCompleteWorkout}
-                  disabled={isCompleting || completionData.rating === 0}
+                  disabled={isCompleting}
                   activeOpacity={0.6}
                 >
                   {isCompleting ? (
-                    <>
-                      <ActivityIndicator color="white" size="small" />
-                      <Text className="text-white text-center font-bold ml-2">
-                        Saving...
-                      </Text>
-                    </>
+                    <ActivityIndicator color="white" />
                   ) : (
-                    <Text className="text-white text-center font-bold">
-                      Complete
+                    <Text className="text-white text-center font-semibold">
+                      Save & Complete
                     </Text>
                   )}
                 </TouchableOpacity>
               </View>
-            </View>
+            </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
 
-      {/* CREATE WORKOUT MODAL */}
-      <Modal visible={createWorkoutModal} transparent animationType="slide">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}
-        >
-          <View className="flex-1 justify-end">
-            <View className="bg-white rounded-t-3xl p-6 max-h-[90%]">
+      {/* CREATE WORKOUT MODAL - FIXED (Single instance) */}
+      <Modal
+        visible={createWorkoutModal}
+        transparent
+        animationType="slide"
+        presentationStyle="overFullScreen"
+        statusBarTranslucent
+        onRequestClose={() => setCreateWorkoutModal(false)}
+      >
+        <View className="flex-1 bg-black/50 justify-end">
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+          >
+            <View
+              className="bg-white rounded-t-3xl p-6"
+              style={{ maxHeight: "90%", minHeight: "50%" }}
+            >
+              {/* Header */}
               <View className="flex-row justify-between items-center mb-6">
                 <Text className="text-2xl font-bold">Create Workout</Text>
                 <TouchableOpacity
-                  onPress={() => setCreateWorkoutModal(false)}
-                  activeOpacity={0.6}
+                  onPress={() => {
+                    setCreateWorkoutModal(false);
+                    setSelectedExercises([]);
+                  }}
                 >
                   <Ionicons name="close" size={28} color="#374151" />
                 </TouchableOpacity>
               </View>
 
-              <ScrollView showsVerticalScrollIndicator={false}>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingBottom: 40 }}
+              >
                 {/* Workout Name */}
                 <View className="mb-4">
                   <Text className="text-sm font-medium text-gray-700 mb-2">
                     Workout Name *
                   </Text>
-                  <TextInput
-                    placeholder="e.g., Morning Cardio"
-                    className="border border-gray-200 rounded-xl p-3"
-                    value={newWorkout.name}
-                    onChangeText={(t) =>
-                      setNewWorkout({ ...newWorkout, name: t })
-                    }
-                  />
+                  <View className="border border-gray-200 rounded-xl p-3">
+                    <TextInput
+                      placeholder="e.g. Morning Cardio"
+                      value={newWorkout.name}
+                      onChangeText={(t) =>
+                        setNewWorkout({ ...newWorkout, name: t })
+                      }
+                      style={{ fontSize: 16 }}
+                    />
+                  </View>
                 </View>
 
                 {/* Description */}
@@ -636,112 +814,83 @@ export default function WorkoutScreen() {
                   <Text className="text-sm font-medium text-gray-700 mb-2">
                     Description
                   </Text>
-                  <TextInput
-                    placeholder="What does this workout include?"
-                    className="border border-gray-200 rounded-xl p-3 min-h-[80px]"
-                    value={newWorkout.description}
-                    onChangeText={(t) =>
-                      setNewWorkout({ ...newWorkout, description: t })
-                    }
-                    multiline
-                    textAlignVertical="top"
-                  />
-                </View>
-
-                {/* Duration */}
-                <View className="mb-4">
-                  <Text className="text-sm font-medium text-gray-700 mb-2">
-                    Duration (minutes) *
-                  </Text>
-                  <TextInput
-                    placeholder="e.g., 30"
-                    className="border border-gray-200 rounded-xl p-3"
-                    value={newWorkout.duration}
-                    onChangeText={(t) =>
-                      setNewWorkout({ ...newWorkout, duration: t })
-                    }
-                    keyboardType="number-pad"
-                  />
-                  <Text className="text-xs text-gray-500 mt-1">
-                    Between 5 and 180 minutes
-                  </Text>
-                </View>
-
-                {/* Category */}
-                <View className="mb-4">
-                  <Text className="text-sm font-medium text-gray-700 mb-2">
-                    Category
-                  </Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    <View className="flex-row gap-2">
-                      {categories
-                        .filter((c) => c !== "all" && c !== "custom")
-                        .map((cat) => (
-                          <TouchableOpacity
-                            key={cat}
-                            onPress={() =>
-                              setNewWorkout({ ...newWorkout, category: cat })
-                            }
-                            className={`px-4 py-2 rounded-full border-2 ${
-                              newWorkout.category === cat
-                                ? "border-blue-600 bg-blue-50"
-                                : "border-gray-200 bg-white"
-                            }`}
-                            activeOpacity={0.6}
-                          >
-                            <Text
-                              className={`capitalize ${
-                                newWorkout.category === cat
-                                  ? "text-blue-600 font-semibold"
-                                  : "text-gray-700"
-                              }`}
-                            >
-                              {cat}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                    </View>
-                  </ScrollView>
-                </View>
-
-                {/* Difficulty */}
-                <View className="mb-6">
-                  <Text className="text-sm font-medium text-gray-700 mb-2">
-                    Difficulty
-                  </Text>
-                  <View className="flex-row justify-between">
-                    {difficultyLevels.map((level) => (
-                      <TouchableOpacity
-                        key={level}
-                        onPress={() =>
-                          setNewWorkout({ ...newWorkout, difficulty: level })
-                        }
-                        className={`flex-1 mx-1 py-3 rounded-xl border-2 ${
-                          newWorkout.difficulty === level
-                            ? "border-blue-600 bg-blue-50"
-                            : "border-gray-200 bg-white"
-                        }`}
-                        activeOpacity={0.6}
-                      >
-                        <Text
-                          className={`text-center capitalize ${
-                            newWorkout.difficulty === level
-                              ? "text-blue-600 font-semibold"
-                              : "text-gray-500"
-                          }`}
-                        >
-                          {level}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
+                  <View className="border border-gray-200 rounded-xl p-3">
+                    <TextInput
+                      placeholder="Optional"
+                      value={newWorkout.description}
+                      onChangeText={(t) =>
+                        setNewWorkout({ ...newWorkout, description: t })
+                      }
+                      multiline
+                      textAlignVertical="top"
+                      style={{ minHeight: 80, fontSize: 16 }}
+                    />
                   </View>
+                </View>
+
+                {/* Exercises */}
+                <View className="mb-6">
+                  <View className="flex-row justify-between items-center mb-2">
+                    <Text className="text-sm font-medium text-gray-700">
+                      Exercises ({selectedExercises.length})
+                    </Text>
+
+                    <TouchableOpacity
+                      onPress={openExerciseSelector}
+                      className="flex-row items-center bg-blue-100 px-3 py-2 rounded-full"
+                    >
+                      <Ionicons name="add" size={16} color="#2563EB" />
+                      <Text className="text-blue-600 ml-1 font-medium">
+                        Add Exercise
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {selectedExercises.length === 0 ? (
+                    <View className="border border-gray-200 rounded-xl p-8 items-center">
+                      <Ionicons
+                        name="barbell-outline"
+                        size={40}
+                        color="#9CA3AF"
+                      />
+                      <Text className="text-gray-400 mt-2">
+                        No exercises added
+                      </Text>
+                    </View>
+                  ) : (
+                    selectedExercises.map((exercise, index) => (
+                      <View
+                        key={`${exercise.name}-${index}`}
+                        className="border border-gray-200 rounded-xl p-3 mb-3 bg-gray-50"
+                      >
+                        <View className="flex-row justify-between items-center">
+                          <Text className="font-semibold text-gray-800">
+                            {exercise.name}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => removeExercise(index)}
+                          >
+                            <Ionicons
+                              name="close-circle"
+                              size={20}
+                              color="#EF4444"
+                            />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ))
+                  )}
                 </View>
 
                 {/* Create Button */}
                 <TouchableOpacity
-                  className="bg-blue-600 py-4 rounded-xl"
+                  disabled={selectedExercises.length === 0}
                   onPress={handleCreateWorkout}
-                  activeOpacity={0.6}
+                  className={`py-4 rounded-xl ${
+                    selectedExercises.length === 0
+                      ? "bg-gray-300"
+                      : "bg-blue-600"
+                  }`}
                 >
                   <Text className="text-white text-center font-bold text-lg">
                     Create Workout
@@ -749,13 +898,185 @@ export default function WorkoutScreen() {
                 </TouchableOpacity>
               </ScrollView>
             </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* EXERCISE SELECTOR MODAL - FIXED */}
+      <Modal
+        visible={showExerciseSelector}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowExerciseSelector(false)}
+      >
+        <View className="flex-1 bg-black/50">
+          <View className="flex-1 mt-20">
+            <View className="flex-1 bg-white rounded-t-3xl">
+              <View className="p-6 border-b border-gray-200">
+                <View className="flex-row justify-between items-center mb-4">
+                  <Text className="text-2xl font-bold">Add Exercises</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowExerciseSelector(false)}
+                    activeOpacity={0.6}
+                  >
+                    <Ionicons name="close" size={28} color="#374151" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Exercise Category Filter */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  className="mb-4"
+                >
+                  <View className="flex-row gap-2">
+                    {["all", "strength", "cardio", "yoga"].map((cat) => (
+                      <TouchableOpacity
+                        key={cat}
+                        onPress={() => setExerciseFilter(cat)}
+                        className={`px-4 py-2 rounded-full ${
+                          exerciseFilter === cat ? "bg-blue-600" : "bg-gray-100"
+                        }`}
+                        activeOpacity={0.6}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Text
+                          className={`capitalize ${
+                            exerciseFilter === cat
+                              ? "text-white"
+                              : "text-gray-700"
+                          }`}
+                        >
+                          {cat}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+              </View>
+
+              <ScrollView
+                className="flex-1"
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ padding: 24 }}
+              >
+                {filteredExercises.map((exercise, index) => {
+                  const isAlreadyAdded = selectedExercises.some(
+                    (ex) => ex.name === exercise.name
+                  );
+
+                  return (
+                    <TouchableOpacity
+                      key={`${exercise.name}-${index}`}
+                      onPress={() => {
+                        if (!isAlreadyAdded) {
+                          addExercise(exercise);
+                        }
+                      }}
+                      className={`border rounded-xl p-4 mb-3 ${
+                        isAlreadyAdded
+                          ? "bg-green-50 border-green-200"
+                          : "bg-white border-gray-200"
+                      }`}
+                      activeOpacity={0.6}
+                      disabled={isAlreadyAdded}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <View className="flex-row justify-between items-start">
+                        <View className="flex-1">
+                          <Text
+                            className={`font-semibold text-base mb-1 ${
+                              isAlreadyAdded
+                                ? "text-green-700"
+                                : "text-gray-800"
+                            }`}
+                          >
+                            {exercise.name}
+                            {isAlreadyAdded && (
+                              <Text className="text-green-600 text-sm ml-2">
+                                ✓ Added
+                              </Text>
+                            )}
+                          </Text>
+                          <View className="flex-row items-center gap-4">
+                            <Text
+                              className={`text-sm ${
+                                isAlreadyAdded
+                                  ? "text-green-600"
+                                  : "text-gray-600"
+                              }`}
+                            >
+                              {exercise.sets} sets
+                            </Text>
+                            {exercise.type === "reps" ? (
+                              <Text
+                                className={`text-sm ${
+                                  isAlreadyAdded
+                                    ? "text-green-600"
+                                    : "text-gray-600"
+                                }`}
+                              >
+                                {exercise.reps} reps
+                              </Text>
+                            ) : (
+                              <Text
+                                className={`text-sm ${
+                                  isAlreadyAdded
+                                    ? "text-green-600"
+                                    : "text-gray-600"
+                                }`}
+                              >
+                                {exercise.duration}s
+                              </Text>
+                            )}
+                            <Text
+                              className={`text-sm ${
+                                isAlreadyAdded
+                                  ? "text-green-600"
+                                  : "text-gray-600"
+                              }`}
+                            >
+                              {exercise.rest}s rest
+                            </Text>
+                          </View>
+                        </View>
+                        {!isAlreadyAdded && (
+                          <TouchableOpacity
+                            onPress={() => addExercise(exercise)}
+                            className="ml-2"
+                            activeOpacity={0.6}
+                            hitSlop={{
+                              top: 10,
+                              bottom: 10,
+                              left: 10,
+                              right: 10,
+                            }}
+                          >
+                            <Ionicons
+                              name="add-circle"
+                              size={24}
+                              color="#10B981"
+                            />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       {/* WORKOUT DETAILS MODAL */}
-      <Modal visible={workoutDetailsModal} transparent animationType="slide">
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }}>
+      <Modal
+        visible={workoutDetailsModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setWorkoutDetailsModal(false)}
+      >
+        <View className="flex-1 bg-black/50">
           <View className="flex-1 mt-20 bg-white rounded-t-3xl">
             {selectedWorkout && (
               <>
@@ -773,7 +1094,10 @@ export default function WorkoutScreen() {
                   </View>
                 </View>
 
-                <ScrollView className="p-6">
+                <ScrollView
+                  className="p-6"
+                  showsVerticalScrollIndicator={false}
+                >
                   {/* Workout Info */}
                   <View className="bg-gray-50 rounded-2xl p-4 mb-6">
                     <View className="flex-row justify-between mb-4">
@@ -828,6 +1152,11 @@ export default function WorkoutScreen() {
                                     {exercise.duration}s
                                   </Text>
                                 )}
+                                {exercise.rest && (
+                                  <Text className="text-gray-600">
+                                    {exercise.rest}s rest
+                                  </Text>
+                                )}
                               </View>
                             </View>
                           )
@@ -835,45 +1164,119 @@ export default function WorkoutScreen() {
                       </View>
                     )}
 
-                  {/* Start Workout Button */}
-                  <TouchableOpacity
-                    className="bg-blue-600 py-4 rounded-xl mb-4"
-                    onPress={() => {
-                      setWorkoutDetailsModal(false);
-                      handleStartWorkout(selectedWorkout);
-                    }}
-                    activeOpacity={0.6}
-                  >
-                    <Text className="text-white text-center font-bold text-lg">
-                      Start Workout
-                    </Text>
-                  </TouchableOpacity>
+                  {/* Action Buttons */}
+                  <View className="space-y-3">
+                    {/* Start Workout Button */}
+                    <TouchableOpacity
+                      className="bg-blue-600 py-4 rounded-xl"
+                      onPress={() => {
+                        setWorkoutDetailsModal(false);
+                        setTimeout(() => {
+                          handleStartWorkout(selectedWorkout);
+                        }, 300);
+                      }}
+                      activeOpacity={0.6}
+                    >
+                      <Text className="text-white text-center font-bold text-lg">
+                        Start Workout
+                      </Text>
+                    </TouchableOpacity>
 
-                  {/* Toggle Favorite */}
-                  <TouchableOpacity
-                    className="border-2 border-gray-200 py-4 rounded-xl flex-row items-center justify-center"
-                    onPress={() => {
-                      toggleFavorite(selectedWorkout.id);
-                      setWorkoutDetailsModal(false);
-                    }}
-                    activeOpacity={0.6}
-                  >
-                    <Ionicons
-                      name={
-                        selectedWorkout.isFavorite ? "heart" : "heart-outline"
-                      }
-                      size={20}
-                      color={selectedWorkout.isFavorite ? "#EF4444" : "#6B7280"}
-                    />
-                    <Text className="text-gray-700 font-semibold ml-2">
-                      {selectedWorkout.isFavorite
-                        ? "Remove from Favorites"
-                        : "Add to Favorites"}
-                    </Text>
-                  </TouchableOpacity>
+                    {/* Toggle Favorite */}
+                    <TouchableOpacity
+                      className="border-2 border-gray-200 py-4 rounded-xl flex-row items-center justify-center"
+                      onPress={() => {
+                        toggleFavorite(selectedWorkout.id);
+                        setWorkoutDetailsModal(false);
+                      }}
+                      activeOpacity={0.6}
+                    >
+                      <Ionicons
+                        name={
+                          selectedWorkout.isFavorite ? "heart" : "heart-outline"
+                        }
+                        size={20}
+                        color={
+                          selectedWorkout.isFavorite ? "#EF4444" : "#6B7280"
+                        }
+                      />
+                      <Text className="text-gray-700 font-semibold ml-2">
+                        {selectedWorkout.isFavorite
+                          ? "Remove from Favorites"
+                          : "Add to Favorites"}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Delete Button (only for custom workouts) */}
+                    {selectedWorkout.createdBy === "user" && (
+                      <TouchableOpacity
+                        className="border-2 border-red-200 bg-red-50 py-4 rounded-xl flex-row items-center justify-center"
+                        onPress={() => {
+                          setWorkoutToDelete(selectedWorkout);
+                          setDeleteConfirmModal(true);
+                        }}
+                        activeOpacity={0.6}
+                      >
+                        <Ionicons
+                          name="trash-outline"
+                          size={20}
+                          color="#EF4444"
+                        />
+                        <Text className="text-red-600 font-semibold ml-2">
+                          Delete Workout
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </ScrollView>
               </>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* DELETE CONFIRMATION MODAL */}
+      <Modal
+        visible={deleteConfirmModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteConfirmModal(false)}
+      >
+        <View className="flex-1 bg-black/50 justify-center items-center p-6">
+          <View className="bg-white rounded-2xl p-6 w-full max-w-md">
+            <View className="items-center mb-6">
+              <View className="bg-red-100 w-16 h-16 rounded-full items-center justify-center mb-4">
+                <Ionicons name="warning" size={32} color="#EF4444" />
+              </View>
+              <Text className="text-xl font-bold text-gray-800 mb-2">
+                Delete Workout
+              </Text>
+              <Text className="text-gray-600 text-center">
+                Are you sure you want to delete "{workoutToDelete?.name}"? This
+                action cannot be undone.
+              </Text>
+            </View>
+
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                className="flex-1 bg-gray-100 py-3 rounded-xl"
+                onPress={() => setDeleteConfirmModal(false)}
+                activeOpacity={0.6}
+              >
+                <Text className="text-gray-700 text-center font-semibold">
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                className="flex-1 bg-red-600 py-3 rounded-xl"
+                onPress={handleDeleteWorkout}
+                activeOpacity={0.6}
+              >
+                <Text className="text-white text-center font-semibold">
+                  Delete
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
