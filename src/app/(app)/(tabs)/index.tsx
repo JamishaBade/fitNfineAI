@@ -13,7 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import { useWorkout } from "../../../hooks/useWorkouts";
+import { useWorkout } from "../../../contexts/WorkoutContext"; // Updated import path
 import { useProfile } from "../../../hooks/useProfile";
 import { WorkoutCard } from "../../../components/WorkoutCard";
 import { WorkoutPlan } from "../../../types/workout";
@@ -35,14 +35,6 @@ interface Profile {
   weeklyWorkoutGoal?: number;
 }
 
-interface Stats {
-  thisWeekWorkouts?: number;
-  totalWorkouts?: number;
-  totalHours?: number;
-  totalCalories?: number;
-  currentStreak?: number;
-}
-
 interface QuickAction {
   id: number;
   title: string;
@@ -53,6 +45,7 @@ interface QuickAction {
   type: string;
   onPress: () => void;
 }
+
 // Enhanced Progress Ring with smooth animation
 const ProgressRing = ({
   size,
@@ -243,7 +236,8 @@ export default function HomeScreen() {
     loading,
     startWorkout,
     refreshWorkoutData,
-  } = useWorkout();
+    toggleFavorite,
+  } = useWorkout(); // Now using the correct context
   const { profile, loading: profileLoading } = useProfile();
   const [refreshing, setRefreshing] = useState(false);
   const [recommendedWorkouts, setRecommendedWorkouts] = useState<WorkoutPlan[]>(
@@ -338,7 +332,8 @@ export default function HomeScreen() {
     const filtered = workoutPlans.filter((plan) => {
       if (!plan) return false;
 
-      // Experience level filter
+      // Experience level filter (removed difficulty filter since it doesn't exist in WorkoutPlan type)
+      // You can add this back if you add difficulty to your WorkoutPlan interface
 
       // Goals filter
       if (userGoals.length > 0) {
@@ -362,10 +357,12 @@ export default function HomeScreen() {
 
     // Sort by relevance and slice
     const sorted = filtered.sort((a, b) => {
-      // Prioritize matching difficulty
-      if (a.difficulty === userExperience && b.difficulty !== userExperience)
+      // Prioritize matching difficulty if available
+      const aDifficulty = (a as any).difficulty;
+      const bDifficulty = (b as any).difficulty;
+      if (aDifficulty === userExperience && bDifficulty !== userExperience)
         return -1;
-      if (b.difficulty === userExperience && a.difficulty !== userExperience)
+      if (bDifficulty === userExperience && aDifficulty !== userExperience)
         return 1;
       return 0;
     });
@@ -411,14 +408,14 @@ export default function HomeScreen() {
       switch (type) {
         case "quick":
           foundWorkout = workoutPlans.find(
-            (w) => w && w.duration && w.duration <= 20
+            (w) => w && (w as any).duration && (w as any).duration <= 20
           );
           break;
         case "strength":
           foundWorkout = workoutPlans.find(
             (w) =>
               w &&
-              (w.category === "strength" ||
+              ((w as any).category === "strength" ||
                 w.name?.toLowerCase().includes("strength") ||
                 w.tags?.some((t) => t.toLowerCase().includes("strength")))
           );
@@ -427,7 +424,7 @@ export default function HomeScreen() {
           foundWorkout = workoutPlans.find(
             (w) =>
               w &&
-              (w.category === "cardio" ||
+              ((w as any).category === "cardio" ||
                 w.name?.toLowerCase().includes("cardio") ||
                 w.tags?.some((t) => t.toLowerCase().includes("cardio")))
           );
@@ -551,6 +548,7 @@ export default function HomeScreen() {
     [handleQuickAction]
   );
 
+  // Stats data from WorkoutContext
   const statsData = useMemo(
     () => [
       {
@@ -558,7 +556,7 @@ export default function HomeScreen() {
         icon: "barbell" as keyof typeof Ionicons.glyphMap,
         color: "#3B82F6",
         bgColor: "bg-blue-100",
-        value: (stats as Stats)?.totalWorkouts || 0,
+        value: stats?.totalWorkouts || 0,
         label: "Total Workouts",
       },
       {
@@ -566,7 +564,7 @@ export default function HomeScreen() {
         icon: "time" as keyof typeof Ionicons.glyphMap,
         color: "#10B981",
         bgColor: "bg-green-100",
-        value: `${(stats as Stats)?.totalHours || 0}h`,
+        value: `${stats?.totalHours || 0}h`,
         label: "Training Time",
       },
       {
@@ -574,7 +572,7 @@ export default function HomeScreen() {
         icon: "flame" as keyof typeof Ionicons.glyphMap,
         color: "#EF4444",
         bgColor: "bg-red-100",
-        value: (stats as Stats)?.totalCalories || 0,
+        value: stats?.totalCalories || 0,
         label: "Calories",
       },
       {
@@ -582,7 +580,7 @@ export default function HomeScreen() {
         icon: "trending-up" as keyof typeof Ionicons.glyphMap,
         color: "#F59E0B",
         bgColor: "bg-orange-100",
-        value: `${(stats as Stats)?.currentStreak || 0}d`,
+        value: `${stats?.streak || 0}d`,
         label: "Streak",
       },
     ],
@@ -688,30 +686,74 @@ export default function HomeScreen() {
         </View>
 
         {/* Active Workout Banner */}
-        {activeWorkout &&
-          (() => {
-            const workout: ActiveWorkout = {
-              planName: (activeWorkout as any)?.planName,
-              completedExercises:
-                (activeWorkout as any)?.completedExercises || 0,
-              exercises: (activeWorkout as any)?.exercises || [],
-              startTime: (activeWorkout as any)?.startTime,
-              totalDuration: (activeWorkout as any)?.totalDuration,
-            };
-
-            const progress =
-              workout.exercises.length > 0
-                ? ((workout.completedExercises || 0) /
-                    workout.exercises.length) *
-                  100
-                : 0;
-
-            return (
-              <View className="px-6 mt-6">
-                <ProgressDashboard />
+        {activeWorkout && (
+          <View className="px-6 mt-6">
+            <TouchableOpacity
+              className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-3xl p-5 shadow-lg"
+              onPress={handleResumeWorkout}
+              activeOpacity={0.8}
+            >
+              <View className="flex-row items-center justify-between">
+                <View className="flex-1">
+                  <View className="flex-row items-center mb-2">
+                    <View className="bg-white/20 rounded-full p-1.5 mr-2">
+                      <Ionicons name="play" size={14} color="white" />
+                    </View>
+                    <Text className="text-white/90 text-sm font-medium">
+                      Workout in Progress
+                    </Text>
+                  </View>
+                  <Text className="text-white text-xl font-bold mb-1">
+                    {activeWorkout.planName}
+                  </Text>
+                  <View className="flex-row items-center">
+                    <Text className="text-white/80 text-sm mr-4">
+                      {activeWorkout.completedExercises || 0}/
+                      {activeWorkout.exercises?.length || 0} exercises
+                    </Text>
+                    {activeWorkout.startTime && (
+                      <WorkoutTimer
+                        startTime={parseInt(activeWorkout.startTime)}
+                      />
+                    )}
+                  </View>
+                </View>
+                <View className="bg-white/20 rounded-full p-3">
+                  <Ionicons name="arrow-forward" size={24} color="white" />
+                </View>
               </View>
-            );
-          })()}
+
+              {/* Progress bar */}
+              <View className="mt-4">
+                <View className="h-1.5 bg-white/30 rounded-full overflow-hidden">
+                  <View
+                    className="h-full bg-white rounded-full"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        ((activeWorkout.completedExercises || 0) /
+                          (activeWorkout.exercises?.length || 1)) *
+                          100
+                      )}%`,
+                    }}
+                  />
+                </View>
+                <View className="flex-row justify-between mt-2">
+                  <Text className="text-white/80 text-xs">
+                    {activeWorkout.currentExerciseIndex + 1} of{" "}
+                    {activeWorkout.exercises?.length} exercises
+                  </Text>
+                  <Text className="text-white/80 text-xs">
+                    Set {activeWorkout.currentSet} of{" "}
+                    {activeWorkout.exercises?.[
+                      activeWorkout.currentExerciseIndex
+                    ]?.sets || 0}
+                  </Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Quick Actions */}
         <View className="mt-8">
@@ -834,18 +876,18 @@ export default function HomeScreen() {
         {/* Activity Status */}
         <View className="px-6 mt-4 mb-8">
           <View className="bg-white rounded-3xl p-6 shadow-sm">
-            {(stats?.thisWeekWorkouts || 0) > 0 ? (
+            {(stats?.totalWorkouts || 0) > 0 ? (
               <View className="items-center">
                 <View className="bg-green-100 rounded-full p-4 mb-4">
                   <Ionicons name="checkmark-circle" size={48} color="#10B981" />
                 </View>
                 <Text className="text-xl font-bold text-gray-900 mb-2">
-                  {stats?.thisWeekWorkouts}{" "}
-                  {stats?.thisWeekWorkouts === 1 ? "Workout" : "Workouts"} This
-                  Week
+                  {stats?.totalWorkouts}{" "}
+                  {stats?.totalWorkouts === 1 ? "Workout" : "Workouts"}{" "}
+                  Completed
                 </Text>
                 <Text className="text-gray-600 mb-4">
-                  Keep the momentum going! 🔥
+                  Average Rating: {stats?.averageRating?.toFixed(1) || "0.0"} ⭐
                 </Text>
                 <TouchableOpacity
                   className="bg-blue-600 px-8 py-3 rounded-2xl active:bg-blue-700"
@@ -861,7 +903,7 @@ export default function HomeScreen() {
                   <Ionicons name="barbell-outline" size={48} color="#6B7280" />
                 </View>
                 <Text className="text-xl font-bold text-gray-900 mb-2">
-                  Start Your Week Strong
+                  Start Your Fitness Journey
                 </Text>
                 <Text className="text-gray-600 mb-4">
                   Begin your fitness journey today!

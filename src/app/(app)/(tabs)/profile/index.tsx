@@ -15,20 +15,22 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useProfile } from "../../../../hooks/useProfile";
+import { useWorkout } from "../../../../contexts/WorkoutContext"; // Import WorkoutContext
 import { ProgressChart } from "../../../../components/ProgressRing";
 import { AchievementBadge } from "../../../../components/AchievementCard";
 import { GoalItem } from "../../../../components/GoalCard";
 import { StatsCard } from "../../../../components/StatsCard";
 import SignOutButton from "../../../../components/profile/SignOutButton";
+
 export default function ProfileScreen() {
   const router = useRouter();
   const {
     profile,
     measurements,
     achievements,
-    stats,
+    stats: profileStats, // Renamed to avoid conflict with WorkoutContext stats
     settings,
-    loading,
+    loading: profileLoading,
     updateProfile,
     addGoal,
     removeGoal,
@@ -38,6 +40,9 @@ export default function ProfileScreen() {
     logout,
     refreshData,
   } = useProfile();
+
+  // Get stats from WorkoutContext
+  const { stats: workoutStats, loading: workoutLoading } = useWorkout();
 
   // Modal states
   const [editNameModal, setEditNameModal] = useState(false);
@@ -85,7 +90,6 @@ export default function ProfileScreen() {
     }
   };
 
-  // Add this with other profile action functions
   const handleSaveEmail = async () => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -233,6 +237,46 @@ export default function ProfileScreen() {
         : "";
     });
 
+  // Calculate stats from both sources
+  const getCombinedStats = () => {
+    // Use WorkoutContext stats as the primary source
+    const workoutTotal = workoutStats?.totalWorkouts || 0;
+    const workoutHours = workoutStats?.totalHours || 0;
+    const workoutCalories = workoutStats?.totalCalories || 0;
+    const workoutStreak = workoutStats?.streak || 0;
+    const workoutWeekly = workoutStats?.thisWeekWorkouts || 0;
+
+    // Get weekly goal from profile
+    const weeklyGoal = profile?.weeklyGoal || 3;
+
+    // Calculate weekly goal progress
+    const weeklyGoalProgress =
+      weeklyGoal > 0 ? Math.min(100, (workoutWeekly / weeklyGoal) * 100) : 0;
+
+    // BMI from profile stats
+    const bmi = profileStats?.bmi || 0;
+    const bmiCategory = profileStats?.bmiCategory || "Normal";
+
+    return {
+      // Core stats from WorkoutContext
+      totalWorkouts: workoutTotal,
+      totalHours: workoutHours,
+      totalCalories: workoutCalories,
+      streak: workoutStreak,
+      thisWeekWorkouts: workoutWeekly,
+      weeklyGoalProgress: weeklyGoalProgress,
+
+      // Additional stats from profile
+      bmi: bmi,
+      bmiCategory: bmiCategory,
+
+      // Helper for display
+      weeklyGoal: weeklyGoal,
+    };
+  };
+
+  const combinedStats = getCombinedStats();
+
   const profileOptions = [
     {
       title: "Edit Profile",
@@ -276,9 +320,17 @@ export default function ProfileScreen() {
       action: () => Alert.alert("Help", "Contact: support@fitnessapp.com"),
       color: "bg-indigo-500",
     },
+    {
+      title: "Logout",
+      icon: "log-out-outline",
+      action: handleLogout,
+      color: "bg-red-500",
+    },
   ];
 
-  if (loading || !profile || !stats) {
+  const loading = profileLoading || workoutLoading;
+
+  if (loading || !profile) {
     return (
       <SafeAreaView className="flex-1 bg-gray-50 items-center justify-center">
         <ActivityIndicator size="large" color="#3B82F6" />
@@ -290,9 +342,11 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView className="flex-1 bg-gray-50">
       <ScrollView showsVerticalScrollIndicator={false} className="flex-1">
-        <View>
+        {/* <View>
           <SignOutButton />
-        </View>
+        </View> */}
+
+        {/* Profile Header */}
         <View className="px-6 pt-6 pb-4 bg-white">
           <View className="flex-row items-center">
             <View className="relative">
@@ -349,7 +403,7 @@ export default function ProfileScreen() {
           </View>
         </View>
 
-        {/* Stats Overview */}
+        {/* Stats Overview - Now using WorkoutContext data */}
         <View className="px-6 mt-6">
           <View className="flex-row justify-between items-center mb-4">
             <Text className="text-xl font-bold text-gray-900">Your Stats</Text>
@@ -362,22 +416,22 @@ export default function ProfileScreen() {
             <View className="w-[48%] mb-4">
               <StatsCard
                 title="Workouts"
-                value={stats.totalWorkouts}
+                value={combinedStats.totalWorkouts}
                 icon="barbell"
                 color="#3B82F6"
                 change={
-                  stats.thisWeekWorkouts > 0
-                    ? `${stats.thisWeekWorkouts} this week`
+                  combinedStats.thisWeekWorkouts > 0
+                    ? `${combinedStats.thisWeekWorkouts} this week`
                     : undefined
                 }
-                trend={stats.thisWeekWorkouts > 0 ? "up" : "neutral"}
+                trend={combinedStats.thisWeekWorkouts > 0 ? "up" : "neutral"}
               />
             </View>
 
             <View className="w-[48%] mb-4">
               <StatsCard
                 title="Streak"
-                value={stats.streak}
+                value={combinedStats.streak}
                 icon="flame"
                 color="#EF4444"
                 trend="up"
@@ -387,7 +441,7 @@ export default function ProfileScreen() {
             <View className="w-[48%]">
               <StatsCard
                 title="Calories"
-                value={`${Math.round(stats.totalCalories / 1000)}k`}
+                value={`${Math.round(combinedStats.totalCalories / 1000)}k`}
                 icon="flame"
                 color="#F59E0B"
                 change="Total burned"
@@ -396,18 +450,53 @@ export default function ProfileScreen() {
             <View className="w-[48%]">
               <StatsCard
                 title="Weekly Goal"
-                value={`${stats.weeklyGoalProgress}%`}
+                value={`${Math.round(combinedStats.weeklyGoalProgress)}%`}
                 icon="flag"
                 color="#10B981"
-                change={`${stats.thisWeekWorkouts}/${profile.weeklyGoal}`}
+                change={`${combinedStats.thisWeekWorkouts}/${combinedStats.weeklyGoal}`}
                 trend={
-                  stats.weeklyGoalProgress >= 100
+                  combinedStats.weeklyGoalProgress >= 100
                     ? "up"
-                    : stats.weeklyGoalProgress > 50
+                    : combinedStats.weeklyGoalProgress > 50
                     ? "neutral"
                     : "down"
                 }
               />
+            </View>
+          </View>
+        </View>
+
+        {/* Additional Stats */}
+        <View className="px-6 mt-4">
+          <View className="flex-row justify-between">
+            <View className="items-center flex-1">
+              <View className="bg-blue-50 p-3 rounded-2xl mb-2">
+                <Ionicons name="time-outline" size={24} color="#3B82F6" />
+              </View>
+              <Text className="text-lg font-bold text-gray-900">
+                {combinedStats.totalHours.toFixed(1)}h
+              </Text>
+              <Text className="text-gray-600 text-sm">Total Training</Text>
+            </View>
+
+            <View className="items-center flex-1">
+              <View className="bg-green-50 p-3 rounded-2xl mb-2">
+                <Ionicons name="trophy-outline" size={24} color="#10B981" />
+              </View>
+              <Text className="text-lg font-bold text-gray-900">
+                {combinedStats.totalWorkouts}
+              </Text>
+              <Text className="text-gray-600 text-sm">Total Workouts</Text>
+            </View>
+
+            <View className="items-center flex-1">
+              <View className="bg-purple-50 p-3 rounded-2xl mb-2">
+                <Ionicons name="star-outline" size={24} color="#8B5CF6" />
+              </View>
+              <Text className="text-lg font-bold text-gray-900">
+                {workoutStats?.averageRating?.toFixed(1) || "0.0"}
+              </Text>
+              <Text className="text-gray-600 text-sm">Avg. Rating</Text>
             </View>
           </View>
         </View>
@@ -546,9 +635,7 @@ export default function ProfileScreen() {
               <React.Fragment key={index}>
                 <TouchableOpacity
                   className="flex-row items-center justify-between p-4"
-                  onPress={
-                    option.title === "Logout" ? handleLogout : option.action
-                  }
+                  onPress={option.action}
                 >
                   <View className="flex-row items-center">
                     <View className={`${option.color} p-3 rounded-xl mr-4`}>
@@ -584,7 +671,7 @@ export default function ProfileScreen() {
         </View>
 
         {/* BMI Information */}
-        {stats.bmi && (
+        {combinedStats.bmi > 0 && (
           <View className="px-6 mb-8">
             <View className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-5">
               <View className="flex-row justify-between items-center mb-3">
@@ -593,32 +680,34 @@ export default function ProfileScreen() {
                 </Text>
                 <View
                   className={`px-3 py-1 rounded-full ${
-                    stats.bmiCategory === "Normal"
+                    combinedStats.bmiCategory === "Normal"
                       ? "bg-green-100"
-                      : stats.bmiCategory === "Underweight"
+                      : combinedStats.bmiCategory === "Underweight"
                       ? "bg-yellow-100"
-                      : stats.bmiCategory === "Overweight"
+                      : combinedStats.bmiCategory === "Overweight"
                       ? "bg-orange-100"
                       : "bg-red-100"
                   }`}
                 >
                   <Text
                     className={`text-sm font-medium ${
-                      stats.bmiCategory === "Normal"
+                      combinedStats.bmiCategory === "Normal"
                         ? "text-green-700"
-                        : stats.bmiCategory === "Underweight"
+                        : combinedStats.bmiCategory === "Underweight"
                         ? "text-yellow-700"
-                        : stats.bmiCategory === "Overweight"
+                        : combinedStats.bmiCategory === "Overweight"
                         ? "text-orange-700"
                         : "text-red-700"
                     }`}
                   >
-                    {stats.bmiCategory}
+                    {combinedStats.bmiCategory}
                   </Text>
                 </View>
               </View>
               <Text className="text-3xl font-bold text-gray-900">
-                {stats.bmi}
+                {typeof combinedStats.bmi === "number"
+                  ? combinedStats.bmi.toFixed(1)
+                  : "N/A"}
               </Text>
               <Text className="text-gray-600 mt-2">
                 BMI between 18.5 and 24.9 is considered healthy

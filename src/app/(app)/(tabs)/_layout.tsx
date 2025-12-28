@@ -56,10 +56,10 @@ function Layout() {
         />
 
         <Tabs.Screen
-          name="profile"
+          name="profile/index"
           options={{
             headerShown: false,
-            title: "Profile",
+            title: "profile",
             tabBarIcon: ({ color, size }) => (
               <AntDesign name="user" color={color} size={size} />
             ),

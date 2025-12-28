@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -7,7 +7,7 @@ import {
   RefreshControl,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useWorkout } from "../../../fitnessApp/src/contexts/WorkoutContext";
 
 // Types
 type TimeFrame = "daily" | "weekly" | "monthly";
@@ -22,63 +22,6 @@ export type WorkoutSession = {
   planName: string;
   calories?: number;
   rating?: number;
-};
-
-// Storage keys
-const STORAGE_KEY = "workout_history";
-
-// Helper to format dates
-const formatDate = (date: Date): string => {
-  return date.toISOString();
-};
-
-// Helper to parse dates
-const parseDate = (dateString: string): Date => {
-  return new Date(dateString);
-};
-
-// Custom Hook for Progress Data
-const useProgressData = () => {
-  const [workoutHistory, setWorkoutHistory] = useState<WorkoutSession[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const loadWorkoutHistory = async () => {
-    try {
-      const saved = await AsyncStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Sort by date (newest first)
-        const sorted = parsed.sort(
-          (a: WorkoutSession, b: WorkoutSession) =>
-            new Date(b.date).getTime() - new Date(a.date).getTime()
-        );
-        setWorkoutHistory(sorted);
-      }
-    } catch (error) {
-      console.error("Error loading workout history:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadWorkoutHistory();
-    setRefreshing(false);
-  };
-
-  useEffect(() => {
-    loadWorkoutHistory();
-  }, []);
-
-  return {
-    workoutHistory,
-    loading,
-    refreshing,
-    onRefresh,
-    reload: loadWorkoutHistory,
-  };
 };
 
 // Mini Chart Component
@@ -125,7 +68,61 @@ const MiniChart: React.FC<{
 export const ProgressDashboard: React.FC = () => {
   const [selectedTimeFrame, setSelectedTimeFrame] =
     useState<TimeFrame>("weekly");
-  const { workoutHistory, loading, refreshing, onRefresh } = useProgressData();
+  const [refreshing, setRefreshing] = useState(false);
+  const { completedWorkouts, loading, refreshWorkoutData } = useWorkout();
+
+  // Convert CompletedWorkout from context to WorkoutSession format
+  const workoutHistory = useMemo(() => {
+    if (!completedWorkouts || completedWorkouts.length === 0) {
+      return [];
+    }
+
+    return completedWorkouts.map((workout) => {
+      // Calculate exercises completed
+      const exercisesCompleted = workout.exercises?.length || 0;
+
+      // Calculate goals achieved (completed sets)
+      const goalsAchieved =
+        workout.exercises?.reduce((sum, ex) => {
+          return sum + (ex.completedSets || 0);
+        }, 0) || 0;
+
+      // Get difficulty with fallback
+      let difficulty: "beginner" | "intermediate" | "advanced" = "intermediate";
+      if (workout.difficulty) {
+        const lower = workout.difficulty.toLowerCase();
+        if (lower === "beginner" || lower === "easy") {
+          difficulty = "beginner";
+        } else if (
+          lower === "intermediate" ||
+          lower === "medium" ||
+          lower === "med"
+        ) {
+          difficulty = "intermediate";
+        } else if (lower === "advanced" || lower === "hard") {
+          difficulty = "advanced";
+        }
+      }
+
+      return {
+        id: workout.id,
+        date: workout.endTime,
+        duration: workout.duration || 0,
+        difficulty: difficulty,
+        exercisesCompleted: exercisesCompleted,
+        goalsAchieved: goalsAchieved,
+        planName: workout.planName || "Workout",
+        calories: workout.caloriesBurned || 0,
+        rating: workout.rating || 0,
+      };
+    });
+  }, [completedWorkouts]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refreshWorkoutData();
+    setRefreshing(false);
+  };
 
   // Calculate date range
   const getDateRange = (timeFrame: TimeFrame) => {
@@ -150,9 +147,14 @@ export const ProgressDashboard: React.FC = () => {
   // Filter and aggregate data
   const chartData = useMemo(() => {
     const { startDate } = getDateRange(selectedTimeFrame);
-    const filtered = workoutHistory.filter(
-      (session) => parseDate(session.date) >= startDate
-    );
+    const filtered = workoutHistory.filter((session) => {
+      try {
+        return new Date(session.date) >= startDate;
+      } catch (e) {
+        console.error("Error filtering session:", e);
+        return false;
+      }
+    });
 
     if (selectedTimeFrame === "daily") {
       const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -160,13 +162,17 @@ export const ProgressDashboard: React.FC = () => {
       const now = new Date();
 
       filtered.forEach((session) => {
-        const sessionDate = parseDate(session.date);
-        const daysDiff = Math.floor(
-          (now.getTime() - sessionDate.getTime()) / (24 * 60 * 60 * 1000)
-        );
-        if (daysDiff < 7) {
-          const dayIndex = (now.getDay() - daysDiff + 7) % 7;
-          data[dayIndex] += session.duration;
+        try {
+          const sessionDate = new Date(session.date);
+          const daysDiff = Math.floor(
+            (now.getTime() - sessionDate.getTime()) / (24 * 60 * 60 * 1000)
+          );
+          if (daysDiff < 7 && daysDiff >= 0) {
+            const dayIndex = (now.getDay() - daysDiff + 7) % 7;
+            data[dayIndex] += session.duration;
+          }
+        } catch (e) {
+          console.error("Error processing session date:", e);
         }
       });
 
@@ -187,12 +193,16 @@ export const ProgressDashboard: React.FC = () => {
       const now = new Date();
 
       filtered.forEach((session) => {
-        const sessionDate = parseDate(session.date);
-        const weekDiff = Math.floor(
-          (now.getTime() - sessionDate.getTime()) / (7 * 24 * 60 * 60 * 1000)
-        );
-        if (weekDiff < 4) {
-          weeks[3 - weekDiff] += session.duration;
+        try {
+          const sessionDate = new Date(session.date);
+          const weekDiff = Math.floor(
+            (now.getTime() - sessionDate.getTime()) / (7 * 24 * 60 * 60 * 1000)
+          );
+          if (weekDiff < 4 && weekDiff >= 0) {
+            weeks[3 - weekDiff] += session.duration;
+          }
+        } catch (e) {
+          console.error("Error processing session date:", e);
         }
       });
 
@@ -220,12 +230,16 @@ export const ProgressDashboard: React.FC = () => {
       const now = new Date();
 
       filtered.forEach((session) => {
-        const sessionDate = parseDate(session.date);
-        const monthDiff =
-          (now.getFullYear() - sessionDate.getFullYear()) * 12 +
-          (now.getMonth() - sessionDate.getMonth());
-        if (monthDiff < 6) {
-          data[5 - monthDiff] += session.duration;
+        try {
+          const sessionDate = new Date(session.date);
+          const monthDiff =
+            (now.getFullYear() - sessionDate.getFullYear()) * 12 +
+            (now.getMonth() - sessionDate.getMonth());
+          if (monthDiff < 6 && monthDiff >= 0) {
+            data[5 - monthDiff] += session.duration;
+          }
+        } catch (e) {
+          console.error("Error processing session date:", e);
         }
       });
 
@@ -246,50 +260,49 @@ export const ProgressDashboard: React.FC = () => {
   // Calculate stats
   const stats = useMemo(() => {
     const { startDate } = getDateRange(selectedTimeFrame);
-    const filtered = workoutHistory.filter(
-      (session) => parseDate(session.date) >= startDate
+    const filtered = workoutHistory.filter((session) => {
+      try {
+        return new Date(session.date) >= startDate;
+      } catch (e) {
+        console.error("Error filtering session:", e);
+        return false;
+      }
+    });
+
+    const totalMinutes = filtered.reduce(
+      (sum, s) => sum + (s.duration || 0),
+      0
     );
 
-    const totalMinutes = filtered.reduce((sum, s) => sum + s.duration, 0);
-
-    // Normalize difficulty values
-    const normalizeDifficulty = (
-      diff: string
-    ): "beginner" | "intermediate" | "advanced" => {
-      const lower = diff.toLowerCase();
-      if (lower === "beginner" || lower === "easy") return "beginner";
-      if (lower === "intermediate" || lower === "medium" || lower === "med")
-        return "intermediate";
-      return "advanced";
-    };
-
+    // Count difficulty breakdown
     const difficultyBreakdown = {
-      beginner: filtered.filter(
-        (s) => normalizeDifficulty(s.difficulty) === "beginner"
-      ).length,
-      intermediate: filtered.filter(
-        (s) => normalizeDifficulty(s.difficulty) === "intermediate"
-      ).length,
-      advanced: filtered.filter(
-        (s) => normalizeDifficulty(s.difficulty) === "advanced"
-      ).length,
+      beginner: filtered.filter((s) => s.difficulty === "beginner").length,
+      intermediate: filtered.filter((s) => s.difficulty === "intermediate")
+        .length,
+      advanced: filtered.filter((s) => s.difficulty === "advanced").length,
     };
 
     const totalCalories = filtered.reduce(
       (sum, s) => sum + (s.calories || 0),
       0
     );
+
+    // Calculate average rating only from workouts that have ratings
+    const ratedWorkouts = filtered.filter((s) => s.rating && s.rating > 0);
     const averageRating =
-      filtered.length > 0
-        ? filtered.reduce((sum, s) => sum + (s.rating || 0), 0) /
-          filtered.length
+      ratedWorkouts.length > 0
+        ? ratedWorkouts.reduce((sum, s) => sum + (s.rating || 0), 0) /
+          ratedWorkouts.length
         : 0;
 
     return {
       totalWorkouts: filtered.length,
       totalMinutes,
       totalHours: totalMinutes / 60,
-      totalGoalsAchieved: filtered.reduce((sum, s) => sum + s.goalsAchieved, 0),
+      totalGoalsAchieved: filtered.reduce(
+        (sum, s) => sum + (s.goalsAchieved || 0),
+        0
+      ),
       difficultyBreakdown,
       totalCalories,
       averageRating,
@@ -313,12 +326,7 @@ export const ProgressDashboard: React.FC = () => {
   }
 
   return (
-    <ScrollView
-      className="px-6 mt-6"
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
-    >
+    <View className="px-6 mt-6">
       <View className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100">
         {/* Header */}
         <View className="flex-row justify-between items-center mb-4">
@@ -555,47 +563,6 @@ export const ProgressDashboard: React.FC = () => {
           </>
         )}
       </View>
-    </ScrollView>
+    </View>
   );
-};
-
-// Export helper function to save workout sessions
-export const saveWorkoutSession = async (
-  session: Omit<WorkoutSession, "id">
-): Promise<WorkoutSession> => {
-  try {
-    const workoutSession: WorkoutSession = {
-      ...session,
-      id: `workout_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      date: session.date || formatDate(new Date()),
-    };
-
-    const saved = await AsyncStorage.getItem(STORAGE_KEY);
-    const history: WorkoutSession[] = saved ? JSON.parse(saved) : [];
-    const updated = [...history, workoutSession];
-
-    // Sort by date (newest first)
-    updated.sort(
-      (a, b) => parseDate(b.date).getTime() - parseDate(a.date).getTime()
-    );
-
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-
-    console.log("Workout session saved:", workoutSession);
-    return workoutSession;
-  } catch (error) {
-    console.error("Error saving workout session:", error);
-    throw error;
-  }
-};
-
-// Helper to clear all workout history (for testing)
-export const clearWorkoutHistory = async () => {
-  try {
-    await AsyncStorage.removeItem(STORAGE_KEY);
-    console.log("Workout history cleared");
-  } catch (error) {
-    console.error("Error clearing workout history:", error);
-    throw error;
-  }
 };
