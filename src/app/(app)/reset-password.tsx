@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import * as React from "react";
 import {
   View,
   Text,
@@ -9,22 +9,23 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
-import { useSignIn } from "@clerk/clerk-expo";
+import { useSignIn, useAuth } from "@clerk/clerk-expo"; // Added useAuth
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 export default function ResetPasswordScreen() {
   const { signIn, setActive, isLoaded } = useSignIn();
+  const { signOut } = useAuth(); // Add signOut
   const router = useRouter();
 
-  const [emailAddress, setEmailAddress] = useState("");
-  const [code, setCode] = useState("");
-  const [password, setPassword] = useState("");
-  const [successfulCreation, setSuccessfulCreation] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState([]);
-  const [currentSignIn, setCurrentSignIn] = useState(null);
+  const [emailAddress, setEmailAddress] = React.useState("");
+  const [code, setCode] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [successfulCreation, setSuccessfulCreation] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [errors, setErrors] = React.useState<Array<{ message: string }>>([]);
+  const [currentSignIn, setCurrentSignIn] = React.useState<any>(null);
 
   if (!isLoaded) {
     return (
@@ -50,14 +51,23 @@ export default function ResetPasswordScreen() {
       setLoading(true);
       setErrors([]);
 
-      // Create sign-in attempt first
+      // First, sign out any existing session
+      try {
+        await signOut();
+      } catch (signOutError) {
+        // Ignore sign out errors - user might not be signed in
+        console.log("Sign out attempt:", signOutError);
+      }
+
+      // Create NEW sign-in attempt for password reset
       const signInAttempt = await signIn.create({
         identifier: emailAddress.trim(),
+        strategy: "reset_password_email_code", // Specify the strategy
       });
 
       // Find the reset factor
       const resetFactor = signInAttempt.supportedFirstFactors?.find(
-        (factor) => factor.strategy === "reset_password_email_code"
+        (factor: any) => factor.strategy === "reset_password_email_code"
       );
 
       if (!resetFactor) {
@@ -74,15 +84,45 @@ export default function ResetPasswordScreen() {
       setCurrentSignIn(signInAttempt);
       setSuccessfulCreation(true);
       Alert.alert("Success", "Check your email for the verification code!");
-    } catch (err) {
+    } catch (err: any) {
       console.error("Reset email error:", JSON.stringify(err, null, 2));
 
-      // For security, show success even if there's an error
-      setSuccessfulCreation(true);
-      Alert.alert(
-        "Check Your Email",
-        "If an account exists with this email, you'll receive a verification code."
-      );
+      // Handle the "session_exists" error specifically
+      if (err.errors?.[0]?.code === "session_exists") {
+        Alert.alert(
+          "Already Signed In",
+          "Please sign out first before resetting your password.",
+          [
+            {
+              text: "Sign Out & Retry",
+              onPress: async () => {
+                try {
+                  await signOut();
+                  // Retry sending reset code after sign out
+                  setTimeout(() => sendResetCode(), 500);
+                } catch (signOutErr) {
+                  Alert.alert("Error", "Failed to sign out. Please try again.");
+                }
+              },
+            },
+            {
+              text: "Cancel",
+              style: "cancel",
+            },
+          ]
+        );
+      } else if (err.errors?.[0]?.message?.includes("not found")) {
+        // For security, show generic message
+        setSuccessfulCreation(true);
+        Alert.alert(
+          "Check Your Email",
+          "If an account exists with this email, you'll receive a verification code."
+        );
+      } else {
+        setErrors([
+          { message: err.errors?.[0]?.message || "Failed to send reset code" },
+        ]);
+      }
     } finally {
       setLoading(false);
     }
@@ -116,12 +156,16 @@ export default function ResetPasswordScreen() {
 
       if (result.status === "complete") {
         await setActive({ session: result.createdSessionId });
-        Alert.alert("Success", "Your password has been reset successfully!");
-        router.replace("/(tabs)");
+        Alert.alert("Success", "Your password has been reset successfully!", [
+          {
+            text: "OK",
+            onPress: () => router.replace("/(app)/(tabs)"),
+          },
+        ]);
       } else {
         setErrors([{ message: "Password reset failed. Please try again." }]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Reset password error:", JSON.stringify(err, null, 2));
 
       if (err.errors) {

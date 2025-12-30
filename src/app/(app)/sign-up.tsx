@@ -238,7 +238,7 @@ export default function SignUpScreen() {
               <Ionicons name="person-add" size={48} color="white" />
             </View>
             <Text className="text-3xl font-bold text-gray-900 mb-2">
-              Join FitTracker
+              Join fitNfine
             </Text>
             <Text className="text-lg text-gray-600 text-center">
               Start your fitness journey{"\n"}and track your progress

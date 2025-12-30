@@ -654,12 +654,6 @@ export default function HomeScreen() {
                   {stats?.thisWeekWorkouts || 0} of {weeklyGoal} workouts
                 </Text>
               </View>
-              <ProgressRing
-                size={70}
-                progress={weeklyProgress}
-                color="#3B82F6"
-                showPercentage
-              />
             </View>
 
             {weeklyProgress >= 100 ? (
